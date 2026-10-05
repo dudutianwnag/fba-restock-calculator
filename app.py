@@ -1,6 +1,7 @@
 # ============================================================
-# 亚马逊FBA智能补货系统（高级商业版 - 华尔街深色风）
-# 安全：API Key 只读环境变量或 Secrets，绝不写死在代码中
+# 亚马逊FBA智能补货系统（最终完整版）
+# 特点：深色商务风 + 复杂表头兼容 + 计算透明 + AI解读
+# 本地/云端通用，支持 Excel 和 CSV
 # ============================================================
 
 import os
@@ -21,19 +22,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ==================== 2. 华尔街金融风 CSS ====================
+# ==================== 2. 商务深色风 CSS ====================
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-
-    /* 整体背景：深灰蓝，专业、沉稳 */
+    
     .stApp {
         background: #0A1120;
         color: #E2E8F0;
     }
-
-    /* 标题：银白，干净利落 */
+    
     .main-title {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 2.5rem;
@@ -43,16 +42,14 @@ st.markdown("""
         letter-spacing: -0.02em;
         margin-bottom: 0.3rem;
     }
-
+    
     .sub-title {
         text-align: center;
         color: #94A3B8;
         font-size: 1rem;
         margin-bottom: 2.5rem;
-        font-weight: 400;
     }
-
-    /* 卡片：深色玻璃质感 */
+    
     div[data-testid="stVerticalBlock"] > div {
         background: #131E35;
         border-radius: 8px;
@@ -60,8 +57,7 @@ st.markdown("""
         border: 1px solid #1E293B;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
     }
-
-    /* 按钮：翡翠绿，代表利润与行动 */
+    
     .stButton > button {
         width: 100%;
         border-radius: 6px;
@@ -70,21 +66,17 @@ st.markdown("""
         font-weight: 600;
         border: none;
         transition: all 0.2s ease;
-        box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
     }
     .stButton > button:hover {
         background: #059669;
-        box-shadow: 0 6px 8px -1px rgba(16, 185, 129, 0.4);
     }
-
-    /* 表格：深色底，清晰边框 */
+    
     .stDataFrame {
         border-radius: 6px;
         overflow: hidden;
         border: 1px solid #1E293B;
     }
-
-    /* Metric 卡片：紧凑，极简 */
+    
     div[data-testid="stMetric"] {
         background: #131E35;
         border: 1px solid #1E293B;
@@ -94,22 +86,18 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ==================== 3. 标题渲染 ====================
+# ==================== 3. 标题 ====================
 st.markdown('<div class="main-title">FBA 智能补货系统</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">上传库存报表 · 精准计算补货量 · 透明展示每一步</div>', unsafe_allow_html=True)
 
-
 # ==================== 4. 安全读取 API Key ====================
 def get_api_key():
-    """优先读 Streamlit Secrets（云端），再读系统环境变量（本地）。"""
     try:
         return st.secrets["DASHSCOPE_API_KEY"]
     except Exception:
         return os.getenv("DASHSCOPE_API_KEY", "")
 
-
 API_KEY = get_api_key()
-
 if not API_KEY:
     st.error("⚠️ 未检测到 API Key，请检查环境变量或 Streamlit Secrets 配置。")
     st.stop()
@@ -118,7 +106,7 @@ if not API_KEY:
 CUSTOMER_PASSWORDS = {
     "fba2026": "试用客户",
     # 收到钱后，在这里加一行，比如：
-    # "fbaVIP001": "张三",
+    # "fbaVIP001": "客户张三",
 }
 
 if "session_id" not in st.session_state:
@@ -133,13 +121,12 @@ with st.sidebar:
     else:
         st.success(f"欢迎，{CUSTOMER_PASSWORDS[password]}")
 
-
 # ==================== 6. 调用 AI ====================
 def call_llm(system_prompt, user_message):
     url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
-        "model": "qwen3.8-flash",
+        "model": "qwen-plus",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
@@ -149,8 +136,7 @@ def call_llm(system_prompt, user_message):
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
-
-# ==================== 7. 万能容错工具函数 ====================
+# ==================== 7. 工具函数 ====================
 def smart_split(text):
     if text is None: return []
     text = str(text).strip()
@@ -158,10 +144,8 @@ def smart_split(text):
     lines = [ln.strip() for ln in re.split(r"[\r\n]+", text) if ln.strip()]
     rows = []
     for ln in lines:
-        if "\t" in ln:
-            parts = ln.split("\t")
-        elif "," in ln:
-            parts = ln.split(",")
+        if "\t" in ln: parts = ln.split("\t")
+        elif "," in ln: parts = ln.split(",")
         else:
             parts = re.split(r"\s{2,}", ln)
             if len(parts) == 1: parts = ln.split(" ")
@@ -169,41 +153,37 @@ def smart_split(text):
         if parts: rows.append(parts)
     return rows
 
-
 def find_column(headers, keywords):
     for i, h in enumerate(headers):
         h_lower = str(h).lower().replace(" ", "").replace("_", "")
         for kw in keywords:
-            if kw.lower() in h_lower: return i
+            if kw.lower() in h_lower:
+                return i
     return None
-
 
 def to_number(val):
     if val is None: return None
     s = str(val).strip().replace(",", "").replace("$", "").replace("%", "").replace("￥", "")
     if s in ["", "-", "n/a", "na", "null", "none", "N/A"]: return None
-    try:
-        return float(s)
-    except:
-        return None
+    try: return float(s)
+    except: return None
 
-
-# ==================== 8. 参数设置区 ====================
+# ==================== 8. 参数设置 ====================
 with st.expander("⚙️ 参数设置（默认即可，按需调整）", expanded=False):
     col1, col2, col3 = st.columns(3)
     with col1:
         safety_days = st.number_input("安全库存天数", min_value=0, max_value=90, value=14)
     with col2:
-        default_lead = st.number_input("默认采购提前期", min_value=1, max_value=90, value=7)
+        default_lead = st.number_input("默认采购提前期（表格没填时使用）", min_value=1, max_value=90, value=30)
     with col3:
-        default_ship = st.number_input("默认物流时效", min_value=1, max_value=120, value=20)
+        default_ship = st.number_input("默认物流时效（表格没填时使用）", min_value=1, max_value=120, value=30)
 
     exclude_skus_raw = st.text_input(
         "排除指定 SKU（可选，多个用逗号分隔）",
         placeholder="例如：A009, B010"
     )
 
-# ==================== 9. 上传文件与核心计算 ====================
+# ==================== 9. 上传与计算 ====================
 uploaded_file = st.file_uploader("📂 上传库存报表（支持 Excel 或 CSV，格式乱也没事）", type=["xlsx", "xls", "csv"])
 
 if uploaded_file is not None:
@@ -226,8 +206,7 @@ if uploaded_file is not None:
             raw_rows = [tuple(str(c) if c is not None else "" for c in r) for r in ws.iter_rows(values_only=True)]
 
         st.write("智能解析结构...")
-        max_cols = max(
-            [len([c for c in r if c is not None and str(c).strip() != ""]) for r in raw_rows]) if raw_rows else 0
+        max_cols = max([len([c for c in r if c is not None and str(c).strip() != ""]) for r in raw_rows]) if raw_rows else 0
         if max_cols <= 1:
             full_text = "\n".join([str(r[0]) for r in raw_rows if r and r[0] is not None])
             raw_rows = smart_split(full_text)
@@ -242,20 +221,20 @@ if uploaded_file is not None:
         data_rows = raw_rows[1:]
 
         st.write("匹配关键列...")
-        col_sku = find_column(headers, ["sku", "产品", "编号", "货号", "asin", "fnsku", "msku"])
-        col_stock = find_column(headers, ["库存", "stock", "available", "可售", "在库", "qty", "quantity"])
-        col_sales = find_column(headers, ["销量", "sales", "日均", "velocity", "sold"])
-        col_lead = find_column(headers, ["提前", "采购", "lead", "交期"])
-        col_ship = find_column(headers, ["时效", "物流", "shipping", "运输", "transit"])
-        col_transit = find_column(headers, ["在途", "inbound", "transit", "在运", "pending"])
-        col_cost = find_column(headers, ["采购价", "成本", "cost", "单价", "进价"])
+        # ========== 扩展后的列匹配规则 ==========
+        col_sku = find_column(headers, ["sku", "产品", "编号", "货号", "asin", "fnsku", "msku", "品名"])
+        col_stock = find_column(headers, ["库存", "stock", "available", "可售", "在库", "qty", "quantity", "fba可售", "fba在途", "awd库存", "国内仓", "海外仓"])
+        col_sales = find_column(headers, ["销量", "sales", "日均", "velocity", "sold", "7天销量", "30天销量", "平均日销"])
+        col_lead = find_column(headers, ["提前", "采购", "lead", "交期", "采购周期", "质检", "上架"])
+        col_ship = find_column(headers, ["时效", "物流", "shipping", "运输", "transit", "运输周期"])
+        col_transit = find_column(headers, ["在途", "inbound", "transit", "在运", "pending", "已下单"])
+        col_cost = find_column(headers, ["采购价", "成本", "cost", "单价", "进价", "拿货价"])
         col_price = find_column(headers, ["售价", "价格", "price", "销售价"])
 
         if col_sku is None or col_stock is None or col_sales is None:
             st.error("❌ 未找到必备列：SKU、库存、日均销量。请检查表头。")
             st.stop()
 
-        # 处理排除SKU
         exclude_skus = set()
         if exclude_skus_raw:
             exclude_skus = {s.strip().upper() for s in exclude_skus_raw.split(",") if s.strip()}
@@ -264,15 +243,9 @@ if uploaded_file is not None:
         results = []
         for row in data_rows:
             if not row: continue
-
-
-            def get_cell(idx):
-                return row[idx] if idx is not None and idx < len(row) else None
-
-
+            def get_cell(idx): return row[idx] if idx is not None and idx < len(row) else None
             sku = get_cell(col_sku)
             if sku is None or str(sku).strip() == "": continue
-            # 排除指定SKU
             if str(sku).strip().upper() in exclude_skus: continue
 
             stock = to_number(get_cell(col_stock)) or 0
@@ -290,12 +263,9 @@ if uploaded_file is not None:
             restock = max(0, int(needed - stock - in_transit))
             days_left = stock / daily_sales
 
-            risk = "🔴 高（即将断货）" if days_left < lead_time + 7 else (
-                "🟡 中（需要关注）" if days_left < lead_time + 14 else "🟢 低（库存健康）")
+            risk = "🔴 高（即将断货）" if days_left < lead_time + 7 else ("🟡 中（需要关注）" if days_left < lead_time + 14 else "🟢 低（库存健康）")
             days_after = (stock + restock) / daily_sales if daily_sales > 0 else 0
             overstock = "⚠️ 补后超储" if days_after > 120 else "正常"
-
-            # 在途库存提示
             transit_flag = f"⚠️ 已有 {int(in_transit)} 个在途" if in_transit > 0 else "-"
 
             results.append({
@@ -303,8 +273,8 @@ if uploaded_file is not None:
                 "当前库存": int(stock),
                 "日均销量": round(daily_sales, 1),
                 "建议补货量": restock,
-                "补货成本(元)": f"¥{restock * cost:,.0f}" if cost > 0 else "-",
-                "断货损失(元/天)": f"¥{daily_sales * price:,.0f}" if price > 0 else "-",
+                "补货成本(元)": f"¥{restock*cost:,.0f}" if cost > 0 else "-",
+                "断货损失(元/天)": f"¥{daily_sales*price:,.0f}" if price > 0 else "-",
                 "断货风险": risk,
                 "距离断货(天)": int(days_left),
                 "补后可用(天)": int(days_after),
@@ -315,8 +285,7 @@ if uploaded_file is not None:
 
         try:
             if os.path.exists(temp_path): os.remove(temp_path)
-        except:
-            pass
+        except: pass
 
         if not results:
             st.error("❌ 没有可计算的有效数据。")
